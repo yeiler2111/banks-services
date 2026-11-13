@@ -1,0 +1,8 @@
+# Lo que NO se envía a Docker al construir (más rápido y sin basura en la imagen)
+target/
+.mvn/
+mvnw
+mvnw.cmd
+.idea/
+.vscode/
+*.iml

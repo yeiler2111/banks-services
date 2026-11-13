@@ -1,0 +1,51 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: account-service
+
+  # Conexión a la BD del paso 2. Formato ${VARIABLE:valor-por-defecto}:
+  # en local usa el valor por defecto; en Docker se sobreescribe con variables de entorno.
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/accounts_db}
+    username: ${SPRING_DATASOURCE_USERNAME:nexus}
+    password: ${SPRING_DATASOURCE_PASSWORD:nexus123}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate   # Hibernate NO crea tablas: solo comprueba que coinciden con las entidades
+    open-in-view: false    # Evita consultas a la BD fuera de la capa de servicio
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration   # Aquí irán V1__..., V2__... (el esquema versionado)
+
+  # Resource Server: solo VERIFICA tokens; el login lo hace Keycloak.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Debe coincidir EXACTAMENTE con el "iss" del token (es la URL pública fija de Keycloak)
+          issuer-uri: ${JWT_ISSUER_URI:http://localhost:8180/auth/realms/nexusbank}
+          # De dónde descargar las claves PÚBLICAS para verificar la firma.
+          # En Docker se sobreescribe con la red interna (keycloak:8080).
+          jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8180/auth/realms/nexusbank/protocol/openid-connect/certs}
+
+# Documentación OpenAPI / Swagger UI
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method     # agrupa por verbo HTTP
+    try-it-out-enabled: true      # botón "Try it out" activo por defecto
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always   # Solo en desarrollo: muestra el estado de la BD en /actuator/health

@@ -1,0 +1,89 @@
+services:
+  # Base de datos del microservicio de cuentas (Database-per-Service)
+  accounts-db:
+    image: postgres:16-alpine          # Imagen oficial, versión fija, variante ligera
+    container_name: nexus-accounts-db
+    environment:
+      POSTGRES_DB: accounts_db         # Se crea al arrancar por primera vez
+      POSTGRES_USER: ${DB_USER}        # Valores leídos del archivo .env
+      POSTGRES_PASSWORD: ${DB_PASS}
+    ports:
+      - "5433:5432"                    # localhost:5433 -> 5432 dentro del contenedor
+    volumes:
+      - accounts_data:/var/lib/postgresql/data   # Los datos sobreviven si borras el contenedor
+    healthcheck:                       # Docker sabe cuándo la BD está lista de verdad
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d accounts_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Base de datos propia de Keycloak (usuarios, realms, sesiones)
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: nexus-keycloak-db
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: ${KC_DB_USER}
+      POSTGRES_PASSWORD: ${KC_DB_PASS}
+    volumes:
+      - kc_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KC_DB_USER} -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Sin "ports": nadie fuera de Docker necesita entrar a esta BD
+
+  # Proveedor de identidad: login, usuarios, roles y emisión de JWT (OAuth2 / OIDC)
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: nexus-keycloak
+    # start-dev: modo desarrollo · URLs bajo /auth · --import-realm: crea el realm desde el JSON si NO existe
+    command: ["start-dev", "--http-relative-path=/auth", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak  # "keycloak-db" = nombre del servicio
+      KC_DB_USERNAME: ${KC_DB_USER}
+      KC_DB_PASSWORD: ${KC_DB_PASS}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASS}
+      # URL pública FIJA: todos los tokens llevan el mismo "iss", los pida quien los pida
+      KC_HOSTNAME: http://localhost:8180/auth
+      # Permite que otros contenedores hablen con Keycloak por la red interna (keycloak:8080)
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import:ro   # realm versionado en git (infra como código)
+    ports:
+      - "8180:8080"                   # consola: http://localhost:8180/auth
+    depends_on:
+      keycloak-db:
+        condition: service_healthy    # no arranca hasta que su BD esté lista
+
+  # Microservicio de cuentas: se CONSTRUYE desde su Dockerfile (no se descarga)
+  account-service:
+    build:
+      context: ./account-service        # carpeta con el Dockerfile
+      additional_contexts:
+        certs: ./certs                  # certificados extra para la etapa de build
+    image: nexusbank/account-service:dev
+    container_name: nexus-account-service
+    environment:
+      # Dentro de Docker la BD se llama por el NOMBRE DEL SERVICIO y su puerto INTERNO
+      SPRING_DATASOURCE_URL: jdbc:postgresql://accounts-db:5432/accounts_db
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASS}
+      # JWT: el "iss" esperado es la URL PÚBLICA (igual que dentro del token)...
+      JWT_ISSUER_URI: http://localhost:8180/auth/realms/nexusbank
+      # ...pero las claves públicas se descargan por la RED INTERNA de Docker
+      JWT_JWK_SET_URI: http://keycloak:8080/auth/realms/nexusbank/protocol/openid-connect/certs
+    ports:
+      - "8081:8081"                     # temporal: luego solo se accederá vía API Gateway
+    depends_on:
+      accounts-db:
+        condition: service_healthy      # espera a que la BD acepte conexiones
+      keycloak:
+        condition: service_started
+
+volumes:
+  accounts_data:
+  kc_data:

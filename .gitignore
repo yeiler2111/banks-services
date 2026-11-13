@@ -1,0 +1,21 @@
+# Secretos: contraseñas y variables locales (nunca al repo)
+.env
+
+# Certificados locales (antivirus/proxy de cada máquina)
+certs/*
+!certs/README.md
+certs
+
+# Compilación de Java/Maven
+target/
+
+# Frontend (más adelante)
+node_modules/
+dist/
+
+# IDEs y sistema operativo
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
